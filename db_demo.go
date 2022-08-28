@@ -14,6 +14,7 @@ const (
 
 const (
   PREPARE_SUCCESS = iota
+  PREPARE_SYNTAX_ERROR = iota
   PREPARE_UNRECOGNIZED_STATEMENT = iota
 )
 
@@ -22,8 +23,46 @@ const (
   STATEMENT_SELECT = iota
 )
 
+const (
+  EXECUTE_TABLE_FULL = iota
+  EXECUTE_SUCCESS = iota
+)
+
+const ROW_SIZE = 1
+const PAGE_SIZE = 4096
+const TABLE_MAX_PAGES = 100
+const TABLE_MAX_ROWS = 100
+const ROWS_PER_PAGE = PAGE_SIZE / ROW_SIZE
+
+type Row struct {
+  id uint32
+  username string
+  email string
+}
+
+type Table struct {
+  num_rows uint32
+  pages [TABLE_MAX_PAGES]interface {}
+}
+
 type Statement struct {
   statement_type int
+  row_to_insert Row
+}
+
+func print_row(row *Row) {
+  fmt.Printf("(%d, %s, %s)\n", row.id, row.username, row.email)
+}
+
+func new_table() *Table {
+  var table Table 
+  table.num_rows = 0
+
+  for i := 0; i < TABLE_MAX_PAGES; i++ {
+    table.pages[i] = nil
+  }
+
+  return &table
 }
 
 func do_meta_command(command *string) int {
@@ -35,8 +74,15 @@ func do_meta_command(command *string) int {
 
 func prepare_statement(command string, stmt *Statement) int {
   if command[:6] == "insert" {
-   stmt.statement_type = STATEMENT_INSERT 
-   return PREPARE_SUCCESS
+    stmt.statement_type = STATEMENT_INSERT 
+    _, err := fmt.Sscanf(command, "insert %d %s %s", &stmt.row_to_insert.id, &stmt.row_to_insert.username, &stmt.row_to_insert.email)
+
+    if err != nil {
+      fmt.Println(err)
+      return PREPARE_SYNTAX_ERROR
+    }
+
+    return PREPARE_SUCCESS
   }
 
   if command[:6] == "select" {
@@ -47,16 +93,39 @@ func prepare_statement(command string, stmt *Statement) int {
   return PREPARE_UNRECOGNIZED_STATEMENT;
 }
 
-func execute_statement(stmt *Statement) {
+func execute_insert(statement *Statement, table *Table) int {
+  if table.num_rows >= TABLE_MAX_ROWS {
+    return EXECUTE_TABLE_FULL
+  }
+
+  row := &(statement.row_to_insert)
+  table.pages[table.num_rows] = row
+  table.num_rows += 1
+
+  return EXECUTE_SUCCESS
+}
+
+func execute_select(statement *Statement, table *Table) int {
+  var row *Row
+
+  for i := 0; i < int(table.num_rows); i++ {
+    row = table.pages[i].(*Row) // casts interface to a *Row
+    print_row(row)
+  }
+
+  return EXECUTE_SUCCESS
+}
+
+func execute_statement(stmt *Statement, table *Table) int {
   switch(stmt.statement_type) {
     case STATEMENT_SELECT:
-      fmt.Printf("This is where we would select data\n")
-      break
+      return execute_select(stmt, table)
 
     case STATEMENT_INSERT:
-      fmt.Printf("This is where we would insert data\n")
-      break
+      return execute_insert(stmt, table)
   }
+
+  return -1
 }
 
 func print_prompt() {
@@ -70,6 +139,8 @@ func read_input(input *string) {
 }
 
 func main() {
+  var table *Table = new_table()
+
   for {
       var command string
 
@@ -92,12 +163,24 @@ func main() {
       switch(prepare_statement(command, &statement)) {
         case PREPARE_SUCCESS:
           break
+        case PREPARE_SYNTAX_ERROR:
+          fmt.Printf("Syntax error. Could not parse element.\n")
+          continue
         case PREPARE_UNRECOGNIZED_STATEMENT:
           fmt.Printf("Unrecognized keyword at start of '%s'.\n", command)
           continue
       }
 
-      execute_statement(&statement)
-      fmt.Printf("Executed.\n")
+      result := execute_statement(&statement, table)
+
+      switch(result) {
+        case EXECUTE_SUCCESS:
+          fmt.Printf("Executed.\n")
+          break
+
+        case EXECUTE_TABLE_FULL:
+          fmt.Printf("Error: Table full.\n")
+          break
+      }
     }
   }
