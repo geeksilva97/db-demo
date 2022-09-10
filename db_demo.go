@@ -3,7 +3,8 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"encoding/binary"
+	// "encoding/binary"
+	"encoding/gob"
 	"fmt"
 	"math"
 	"os"
@@ -45,13 +46,13 @@ type Pager struct {
 }
 
 type Page struct {
-  rows [ROWS_PER_PAGE]Row
+  Rows [ROWS_PER_PAGE]Row
 }
 
 type Row struct {
-  id uint32 // 4 bytes
-  username string // 18 bytes
-  email string // 18 bytes
+  Id uint32 // 4 bytes
+  Username string // 18 bytes
+  Email string // 18 bytes
 }
 
 type Table struct {
@@ -65,7 +66,7 @@ type Statement struct {
 }
 
 func print_row(row *Row) {
-  fmt.Printf("(%d, %s, %s)\n", row.id, row.username, row.email)
+  fmt.Printf("(%d, %s, %s)\n", row.Id, row.Username, row.Email)
 }
 
 func db_open(filename string) *Table {
@@ -108,7 +109,7 @@ func get_page(pager *Pager, page_num uint32) interface{} {
     os.Exit(-1)
   } 
 
-  num_rows := len(pager.pages[page_num].rows)
+  num_rows := len(pager.pages[page_num].Rows)
 
   if num_rows == 0 {
     num_pages := pager.file_length / PAGE_SIZE
@@ -138,7 +139,7 @@ func get_page(pager *Pager, page_num uint32) interface{} {
 
 func pager_flush(pager *Pager, page_num int, size int) {
   fmt.Printf("Flushing page %d\n", page_num)
-  num_rows := len(pager.pages[page_num].rows)
+  num_rows := len(pager.pages[page_num].Rows)
   if num_rows == 0{
     fmt.Printf("Tried to flush a null page\n")
     os.Exit(-1)
@@ -148,13 +149,20 @@ func pager_flush(pager *Pager, page_num int, size int) {
 
   // fmt.Printf("Id: %v\nNome: %v\nEmail: %v\n", page.id, page.username, page.email)
 
-  writer := new(bytes.Buffer)
+  buf := new(bytes.Buffer)
+  enc := gob.NewEncoder(buf)
 
-  binary.Write(writer, binary.LittleEndian, page)
+  // err := binary.Write(buf, binary.LittleEndian, "ell")
+  err := enc.Encode(page)
 
-  fmt.Printf("Bytes in buffer: %b\n", writer.Bytes())
+  if err != nil {
+    fmt.Printf("Erro ao converter para a representacao binaria\n")
+    panic(err)
+  }
 
-  written_bytes, err := pager.file_descriptor.WriteAt(writer.Bytes(), int64(page_num) * PAGE_SIZE)
+  fmt.Printf("Bytes in buffer: %v\n", buf.Bytes())
+
+  written_bytes, err := pager.file_descriptor.WriteAt(buf.Bytes(), int64(page_num) * PAGE_SIZE)
 
   if err != nil {
     fmt.Printf("Error writing\n")
@@ -172,7 +180,7 @@ func db_close(table *Table) {
   fmt.Printf("num_full_pages: %v\n", num_full_pages)
 
   for i := 0; i < num_full_pages; i++ {
-    num_rows := len(pager.pages[i].rows)
+    num_rows := len(pager.pages[i].Rows)
     if num_rows > 0 {
       pager_flush(pager, i, PAGE_SIZE)
       pager.pages[i] = Page{}
@@ -183,7 +191,7 @@ func db_close(table *Table) {
   fmt.Printf("num_additional_rows: %v\n", num_additional_rows)
   if num_additional_rows > 0 {
     page_num := num_full_pages
-    num_rows := len(pager.pages[page_num].rows)
+    num_rows := len(pager.pages[page_num].Rows)
 
     if num_rows > 0 {
       pager_flush(pager, page_num, num_additional_rows * PAGE_SIZE)
@@ -214,7 +222,7 @@ func do_meta_command(command *string, table *Table) int {
 func prepare_statement(command string, stmt *Statement) int {
   if command[:6] == "insert" {
     stmt.statement_type = STATEMENT_INSERT 
-    _, err := fmt.Sscanf(command, "insert %d %s %s", &stmt.row_to_insert.id, &stmt.row_to_insert.username, &stmt.row_to_insert.email)
+    _, err := fmt.Sscanf(command, "insert %d %s %s", &stmt.row_to_insert.Id, &stmt.row_to_insert.Username, &stmt.row_to_insert.Email)
 
     if err != nil {
       return PREPARE_SYNTAX_ERROR
@@ -261,7 +269,7 @@ func execute_insert(statement *Statement, table *Table) int {
 
   fmt.Printf("Page number: %v // Row number %v\n", page_number_to_insert, row_number)
 
-  table.pager.pages[page_number_to_insert].rows[row_number] = *row
+  table.pager.pages[page_number_to_insert].Rows[row_number] = *row
   table.num_rows += 1
 
   return EXECUTE_SUCCESS
@@ -272,12 +280,10 @@ func execute_select(statement *Statement, table *Table) int {
 
   num_pages := int(math.Ceil( float64(table.num_rows) / float64( ROWS_PER_PAGE)))
 
-  fmt.Printf("numero de paginas: %v | num rows: %v\n", num_pages, table.num_rows)
-
   for i := 0; i < num_pages; i++ {
-    for j := 0; j < len(table.pager.pages[i].rows); j++ {
-      row = &table.pager.pages[i].rows[j]
-      if row.id == 0 {
+    for j := 0; j < len(table.pager.pages[i].Rows); j++ {
+      row = &table.pager.pages[i].Rows[j]
+      if row.Id == 0 {
         continue
       }
       print_row(row)
