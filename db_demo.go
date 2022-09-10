@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"unsafe"
@@ -40,7 +41,11 @@ const TABLE_MAX_ROWS = 100
 type Pager struct {
   file_descriptor *os.File
   file_length uint32
-  pages [TABLE_MAX_PAGES]interface {}
+  pages [TABLE_MAX_PAGES]Page
+}
+
+type Page struct {
+  rows [ROWS_PER_PAGE]Row
 }
 
 type Row struct {
@@ -91,7 +96,7 @@ func pager_open(filename string) *Pager {
 
 
   for i := 0; i < TABLE_MAX_PAGES; i++ {
-    pager.pages[i] = nil
+    pager.pages[i] = Page{}
   }
 
   return &pager 
@@ -103,7 +108,9 @@ func get_page(pager *Pager, page_num uint32) interface{} {
     os.Exit(-1)
   } 
 
-  if pager.pages[page_num] == nil {
+  num_rows := len(pager.pages[page_num].rows)
+
+  if num_rows == 0 {
     num_pages := pager.file_length / PAGE_SIZE
 
     if pager.file_length % PAGE_SIZE > 0 {
@@ -119,7 +126,10 @@ func get_page(pager *Pager, page_num uint32) interface{} {
         os.Exit(-1)
       }
 
-      pager.pages[page_num] = bytes_read
+      fmt.Printf("how much bytes read? %v\n", bytes_read)
+
+      // TODO: Convert bytes to pages and rows
+      // pager.pages[page_num] = bytes_read
     }
   }
 
@@ -128,18 +138,19 @@ func get_page(pager *Pager, page_num uint32) interface{} {
 
 func pager_flush(pager *Pager, page_num int, size int) {
   fmt.Printf("Flushing page %d\n", page_num)
-  if pager.pages[page_num] == nil {
+  num_rows := len(pager.pages[page_num].rows)
+  if num_rows == 0{
     fmt.Printf("Tried to flush a null page\n")
     os.Exit(-1)
   }
 
-  page := pager.pages[page_num].(*Row)
+  page := pager.pages[page_num]
 
-  fmt.Printf("Id: %v\nNome: %v\nEmail: %v\n", page.id, page.username, page.email)
+  // fmt.Printf("Id: %v\nNome: %v\nEmail: %v\n", page.id, page.username, page.email)
 
   writer := new(bytes.Buffer)
 
-  binary.Write(writer, binary.LittleEndian, pager.pages[page_num])
+  binary.Write(writer, binary.LittleEndian, page)
 
   fmt.Printf("Bytes in buffer: %b\n", writer.Bytes())
 
@@ -161,9 +172,10 @@ func db_close(table *Table) {
   fmt.Printf("num_full_pages: %v\n", num_full_pages)
 
   for i := 0; i < num_full_pages; i++ {
-    if pager.pages[i] != nil {
+    num_rows := len(pager.pages[i].rows)
+    if num_rows > 0 {
       pager_flush(pager, i, PAGE_SIZE)
-      pager.pages[i] = nil
+      pager.pages[i] = Page{}
     }
   }
 
@@ -171,10 +183,11 @@ func db_close(table *Table) {
   fmt.Printf("num_additional_rows: %v\n", num_additional_rows)
   if num_additional_rows > 0 {
     page_num := num_full_pages
+    num_rows := len(pager.pages[page_num].rows)
 
-    if pager.pages[page_num] != nil {
+    if num_rows > 0 {
       pager_flush(pager, page_num, num_additional_rows * PAGE_SIZE)
-      pager.pages[page_num] = nil
+      pager.pages[page_num] = Page{}
     }
   }
 
@@ -186,7 +199,7 @@ func db_close(table *Table) {
   }
 
   for i := 0; i < TABLE_MAX_PAGES; i++ {
-    pager.pages[i] = nil
+    pager.pages[i] = Page{}
   }
 }
 
@@ -224,7 +237,31 @@ func execute_insert(statement *Statement, table *Table) int {
   }
 
   row := &(statement.row_to_insert)
-  table.pager.pages[table.num_rows] = row
+  page_number_to_insert := (table.num_rows + 1) / ROWS_PER_PAGE
+
+    /*
+    * row number pode ser numero de linhas
+    * linhas por pagina * (numero da pagina + 1) - (num_rows)
+    * Lines_per_page: 20
+    * Page: 0
+    * Num rows: 15
+    * 19 * 1 - 15 = 4
+    (funciona mas preenche o array de traz pra frente)
+    fn -> ((20 * 1 + 15) % 20)+1 = 16 -> funciona bem
+    fn -> ((20 * 1 + 19) % 20)+1 = 20 -> nao funciona
+
+    numero de linhas * (pagina +1) + num-rows + 1
+    fn -> ((20 * 1 + 19 + 1) % 20) = 20 -> nao funciona
+    */
+
+  // row_number := len(table.pager.pages[page_number_to_insert].rows)
+  fmt.Printf("rows per page: %v\nnum rows: %v\n", ROWS_PER_PAGE, table.num_rows)
+  // row_number := 0
+  row_number := (table.num_rows * (page_number_to_insert + 1)) % ROWS_PER_PAGE
+
+  fmt.Printf("Page number: %v // Row number %v\n", page_number_to_insert, row_number)
+
+  table.pager.pages[page_number_to_insert].rows[row_number] = *row
   table.num_rows += 1
 
   return EXECUTE_SUCCESS
@@ -233,9 +270,18 @@ func execute_insert(statement *Statement, table *Table) int {
 func execute_select(statement *Statement, table *Table) int {
   var row *Row
 
-  for i := 0; i < int(table.num_rows); i++ {
-    row = table.pager.pages[i].(*Row) // casts interface to a *Row
-    print_row(row)
+  num_pages := int(math.Ceil( float64(table.num_rows) / float64( ROWS_PER_PAGE)))
+
+  fmt.Printf("numero de paginas: %v | num rows: %v\n", num_pages, table.num_rows)
+
+  for i := 0; i < num_pages; i++ {
+    for j := 0; j < len(table.pager.pages[i].rows); j++ {
+      row = &table.pager.pages[i].rows[j]
+      if row.id == 0 {
+        continue
+      }
+      print_row(row)
+    }
   }
 
   return EXECUTE_SUCCESS
