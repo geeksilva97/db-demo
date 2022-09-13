@@ -22,6 +22,10 @@ Here's an example:
   }
   ```
 
+Links
+  - https://dlintw.github.io/gobyexample/public/memory-and-sizeof.html
+  - https://www.includehelp.com/golang/read-a-structure-from-the-file.aspx
+
 Sep 10 - In the tutorial the pages is a `void*` but such a type does not exist in Go. I tried to use `interface` but
 this type only define methods. So I decided to create a new struct called `Page` to hold the rows in an array.
 
