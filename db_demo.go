@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"bytes"
-	// "encoding/binary"
 	"encoding/gob"
 	"fmt"
 	"math"
@@ -51,8 +50,8 @@ type Page struct {
 
 type Row struct {
   Id uint32 // 4 bytes
-  Username string // 18 bytes
-  Email string // 18 bytes
+  Username [32]byte // 32 bytes
+  Email [255]byte // 255 bytes
 }
 
 type Table struct {
@@ -72,6 +71,8 @@ func print_row(row *Row) {
 func db_open(filename string) *Table {
   pager := pager_open(filename)
   num_rows := int(pager.file_length ) / ROW_SIZE
+
+  fmt.Printf("Numero de linhas %v\n", num_rows)
 
   var table Table 
   table.pager = pager
@@ -222,9 +223,14 @@ func do_meta_command(command *string, table *Table) int {
 func prepare_statement(command string, stmt *Statement) int {
   if command[:6] == "insert" {
     stmt.statement_type = STATEMENT_INSERT 
-    _, err := fmt.Sscanf(command, "insert %d %s %s", &stmt.row_to_insert.Id, &stmt.row_to_insert.Username, &stmt.row_to_insert.Email)
+    var username, email string
+    _, err := fmt.Sscanf(command, "insert %d %s %s", &stmt.row_to_insert.Id, &username, &email)
+
+    copy(stmt.row_to_insert.Username[:], username)
+    copy(stmt.row_to_insert.Email[:], email)
 
     if err != nil {
+      fmt.Printf("Err: %v", err.Error())
       return PREPARE_SYNTAX_ERROR
     }
 
