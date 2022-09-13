@@ -1,5 +1,27 @@
 # Notes about the implementation
 
+[Sep 12, 2022]
+
+- Today we're going to fix the strings to calc the row size
+
+Here's an example:
+ 
+  ```go
+  package main
+
+  import "fmt"
+
+  func main() {
+    var fixedSizeString [5]byte
+
+    // copy(dest, source) - dest has to be a slice of bytes
+    copy(fixedSizeString[:], "Hello world")
+
+    fmt.Println(fixedSizeString)
+    fmt.Println(string(fixedSizeString[:])) // string() also expects a slice of bytes
+  }
+  ```
+
 Sep 10 - In the tutorial the pages is a `void*` but such a type does not exist in Go. I tried to use `interface` but
 this type only define methods. So I decided to create a new struct called `Page` to hold the rows in an array.
 

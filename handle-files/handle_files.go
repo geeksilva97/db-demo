@@ -19,12 +19,21 @@ type myOptimizedStruct struct {
   myBool bool // 1 byte
 }
 
+type Row struct {
+  Username [32]byte
+  Email [200]byte
+  Id uint32
+}
+
 func main() {
   a := myStruct{}
   fmt.Println(unsafe.Sizeof(a)) // 24
 
   b := myOptimizedStruct{}
   fmt.Println(unsafe.Sizeof(b)) // 16
+
+  c := Row{}
+  fmt.Printf("Size of Row with fized size string %v\n\n", unsafe.Sizeof(c)) // 236 bytes
 
   fi, err := os.Open("input.txt")
 
